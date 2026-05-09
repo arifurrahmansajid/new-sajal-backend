@@ -2,18 +2,10 @@ const express = require('express');
 const router = express.Router();
 const Enquiry = require('../models/Enquiry');
 const { protect } = require('../middleware/auth');
-const nodemailer = require('nodemailer');
+const { Resend } = require('resend');
 
-// ── SMTP Transporter ────────────────────────────────────────
-const transporter = nodemailer.createTransport({
-  host: process.env.SMTP_HOST || 'smtp.gmail.com',
-  port: parseInt(process.env.SMTP_PORT || '587'),
-  secure: process.env.SMTP_SECURE === 'true',
-  auth: {
-    user: process.env.EMAIL_USER,
-    pass: process.env.EMAIL_PASSWORD,
-  },
-});
+// ── Resend Configuration ─────────────────────────────────────
+const resend = new Resend(process.env.RESEND_API_KEY);
 
 // ── Helper: Build HTML email ────────────────────────────────
 const buildEmailHTML = (data) => `
@@ -67,7 +59,7 @@ const buildEmailHTML = (data) => `
 `;
 
 // @route   POST /api/enquiry
-// @desc    Submit a new enquiry — saves to DB and sends email via SMTP
+// @desc    Submit a new enquiry — saves to DB and sends email via Resend
 // @access  Public
 router.post('/', async (req, res) => {
   try {
@@ -75,17 +67,23 @@ router.post('/', async (req, res) => {
     const newEnquiry = new Enquiry(req.body);
     await newEnquiry.save();
 
-    // 2. Send email via SMTP
-    const mailOptions = {
-      from: `"Envision Enquiry" <${process.env.EMAIL_FROM}>`,
+    // 2. Send email via Resend
+    const enquiryId = newEnquiry._id.toString().slice(-6).toUpperCase();
+    const { data, error } = await resend.emails.send({
+      from: `${process.env.EMAIL_FROM_NAME || 'Envision'} <onboarding@resend.dev>`,
       to: process.env.EMAIL_TO,
-      replyTo: req.body.email,
-      subject: `New Enquiry from ${req.body.firstName} ${req.body.lastName} — ${req.body.eventType}`,
+      reply_to: req.body.email,
+      subject: `[Enquiry #${enquiryId}] ${req.body.firstName} ${req.body.lastName}`,
       html: buildEmailHTML(req.body),
-    };
+    });
 
-    await transporter.sendMail(mailOptions);
-    console.log(`📧 Enquiry email sent to ${process.env.EMAIL_TO}`);
+    if (error) {
+      console.error('Resend Error:', error);
+      // Fallback response even if email fails to keep the UX smooth
+      return res.status(201).json({ success: true, message: 'Enquiry submitted (Email pending API Key)' });
+    }
+
+    console.log(`📧 Enquiry email sent via Resend: ${data.id}`);
 
     res.status(201).json({ success: true, message: 'Enquiry submitted successfully' });
   } catch (error) {
