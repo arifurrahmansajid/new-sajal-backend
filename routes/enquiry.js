@@ -80,6 +80,30 @@ const buildEmailHTML = (data) => `
 </html>
 `;
 
+// ── Spam Filter Helper ──────────────────────────────────────
+const isSpam = (data) => {
+  const spamKeywords = [
+    'crypto', 'bitcoin', 'investment', 'casino', 'gambling', 'viagra', 'cialis',
+    'earn money', 'work from home', 'marketing agency', 'seo services',
+    'get rich', 'sugar daddy', 'onlyfans', 'hack', 'software development company'
+  ];
+  
+  const content = `${data.firstName} ${data.lastName} ${data.message} ${data.email}`.toLowerCase();
+  
+  // 1. Check for keywords
+  if (spamKeywords.some(keyword => content.includes(keyword))) return true;
+  
+  // 2. Check for excessive URLs
+  const urlCount = (data.message.match(/https?:\/\//gi) || []).length;
+  if (urlCount > 2) return true;
+  
+  // 3. Check for specific spam patterns (e.g. "Russian" characters or weird strings)
+  const cyrillicPattern = /[\u0400-\u04FF]/;
+  if (cyrillicPattern.test(data.message)) return true;
+
+  return false;
+};
+
 // @route   POST /api/enquiry
 // @desc    Submit a new enquiry — saves to DB and sends email via SMTP
 // @access  Public
@@ -87,31 +111,39 @@ router.post('/', async (req, res) => {
   try {
     console.log('📩 Received new enquiry from:', req.body.email);
 
+    const spamFlag = isSpam(req.body);
+    if (spamFlag) {
+      console.log('⚠️ Spam detected for enquiry from:', req.body.email);
+    }
+
     // 1. Save to MongoDB
-    const newEnquiry = new Enquiry(req.body);
+    const newEnquiry = new Enquiry({
+      ...req.body,
+      status: spamFlag ? 'spam' : 'unread'
+    });
     await newEnquiry.save();
-    console.log('✅ Enquiry saved to database');
+    console.log('✅ Enquiry saved to database (Status: ' + (spamFlag ? 'spam' : 'unread') + ')');
 
-    // 2. Send email via SMTP
-    const enquiryId = newEnquiry._id.toString().slice(-6).toUpperCase();
-    
-    const mailOptions = {
-      from: `"${process.env.EMAIL_FROM_NAME || 'Envision'}" <${process.env.EMAIL_USER}>`,
-      to: process.env.EMAIL_TO,
-      replyTo: req.body.email,
-      subject: `[Enquiry #${enquiryId}] ${req.body.firstName} ${req.body.lastName}`,
-      html: buildEmailHTML(req.body),
-    };
+    // 2. Send email via SMTP (ONLY if not spam)
+    if (!spamFlag) {
+      const enquiryId = newEnquiry._id.toString().slice(-6).toUpperCase();
+      
+      const mailOptions = {
+        from: `"${process.env.EMAIL_FROM_NAME || 'Envision'}" <${process.env.EMAIL_USER}>`,
+        to: process.env.EMAIL_TO,
+        replyTo: req.body.email,
+        subject: `[Enquiry #${enquiryId}] ${req.body.firstName} ${req.body.lastName}`,
+        html: buildEmailHTML(req.body),
+      };
 
-    console.log(`📤 Attempting to send email to: ${process.env.EMAIL_TO}`);
+      console.log(`📤 Attempting to send email to: ${process.env.EMAIL_TO}`);
 
-    // Use await for sendMail to catch errors properly
-    try {
-      const info = await transporter.sendMail(mailOptions);
-      console.log(`📧 Enquiry email sent via SMTP: ${info.messageId}`);
-    } catch (mailError) {
-      console.error('❌ SMTP Error while sending enquiry email:', mailError);
-      // We don't fail the whole request if email fails, as the enquiry is already in DB
+      try {
+        const info = await transporter.sendMail(mailOptions);
+        console.log(`📧 Enquiry email sent via SMTP: ${info.messageId}`);
+      } catch (mailError) {
+        console.error('❌ SMTP Error while sending enquiry email:', mailError);
+      }
     }
 
     // We return success even if email is async sending to keep UX fast
@@ -129,6 +161,19 @@ router.patch('/:id/read', protect, async (req, res) => {
   try {
     const enquiry = await Enquiry.findByIdAndUpdate(req.params.id, { status: 'read' }, { new: true });
     res.json(enquiry);
+  } catch (error) {
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+// @route   PATCH /api/enquiry/:id/spam
+// @desc    Toggle spam status
+// @access  Private (Admin)
+router.patch('/:id/spam', protect, async (req, res) => {
+  try {
+    const { status } = req.body; // should be 'spam' or 'unread'
+    const enquiry = await Enquiry.findByIdAndUpdate(req.params.id, { status }, { new: true });
+    res.json({ success: true, enquiry });
   } catch (error) {
     res.status(500).json({ success: false, message: 'Server error' });
   }
