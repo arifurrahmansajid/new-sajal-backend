@@ -1,14 +1,14 @@
 require('dotenv').config();
-const express    = require('express');
-const cors       = require('cors');
-const connectDB  = require('./config/db');
+const express = require('express');
+const cors = require('cors');
+const connectDB = require('./config/db');
 const { execSync } = require('child_process');
 
 const app = express();
 
 // ── Middleware ─────────────────────────────────────────────
 app.use(cors({
-  origin: ['http://localhost:5173', 'http://localhost:5174', 'http://localhost:3000', 'https://cleint-12-g1yv.vercel.app'],
+  origin: ['http://localhost:5173', 'http://localhost:5174', 'http://localhost:3000', 'https://cleint-12-g1yv.vercel.app', 'https://new-sajal-backend.vercel.app'],
   credentials: true,
 }));
 
@@ -16,9 +16,9 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
 // ── Routes ─────────────────────────────────────────────────
-app.use('/api/auth',     require('./routes/auth'));
-app.use('/api/blogs',    require('./routes/blog'));
-app.use('/api/enquiry',  require('./routes/enquiry'));
+app.use('/api/auth', require('./routes/auth'));
+app.use('/api/blogs', require('./routes/blog'));
+app.use('/api/enquiry', require('./routes/enquiry'));
 app.use('/api/settings', require('./routes/settings'));
 
 // ── Health check ───────────────────────────────────────────
@@ -52,7 +52,7 @@ const freePort = (port) => {
       try {
         execSync(`taskkill /F /PID ${pid}`);
         console.log(`🔫 Freed port ${port} by killing PID ${pid}`);
-      } catch (_) {}
+      } catch (_) { }
     });
   } catch (_) {
     // Port was already free
