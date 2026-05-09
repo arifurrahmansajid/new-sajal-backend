@@ -2,12 +2,34 @@ const express = require('express');
 const router = express.Router();
 const Enquiry = require('../models/Enquiry');
 const { protect } = require('../middleware/auth');
-const { Resend } = require('resend');
+// const { Resend } = require('resend'); // Commented out Resend
+const nodemailer = require('nodemailer');
 
-// ── Resend Configuration ─────────────────────────────────────
-const resend = new Resend(process.env.RESEND_API_KEY);
+// ── SMTP Configuration ───────────────────────────────────────
+const transporter = nodemailer.createTransport({
+  host: process.env.SMTP_HOST || 'smtp.gmail.com',
+  port: parseInt(process.env.SMTP_PORT || '587'),
+  secure: process.env.SMTP_SECURE === 'true', // true for 465, false for other ports
+  auth: {
+    user: process.env.EMAIL_USER,
+    pass: process.env.EMAIL_PASSWORD,
+  },
+});
+
+// Verify SMTP connection
+transporter.verify((error, success) => {
+  if (error) {
+    console.error('❌ SMTP Connection Error:', error);
+  } else {
+    console.log('✅ SMTP Server is ready to take our messages');
+  }
+});
+
+// ── Resend Configuration (Commented Out) ─────────────────────
+// const resend = new Resend(process.env.RESEND_API_KEY);
 
 // ── Helper: Build HTML email ────────────────────────────────
+// ... (buildEmailHTML remains the same)
 const buildEmailHTML = (data) => `
 <!DOCTYPE html>
 <html>
@@ -59,35 +81,43 @@ const buildEmailHTML = (data) => `
 `;
 
 // @route   POST /api/enquiry
-// @desc    Submit a new enquiry — saves to DB and sends email via Resend
+// @desc    Submit a new enquiry — saves to DB and sends email via SMTP
 // @access  Public
 router.post('/', async (req, res) => {
   try {
+    console.log('📩 Received new enquiry from:', req.body.email);
+
     // 1. Save to MongoDB
     const newEnquiry = new Enquiry(req.body);
     await newEnquiry.save();
+    console.log('✅ Enquiry saved to database');
 
-    // 2. Send email via Resend
+    // 2. Send email via SMTP
     const enquiryId = newEnquiry._id.toString().slice(-6).toUpperCase();
-    const { data, error } = await resend.emails.send({
-      from: `${process.env.EMAIL_FROM_NAME || 'Envision'} <onboarding@resend.dev>`,
+    
+    const mailOptions = {
+      from: `"${process.env.EMAIL_FROM_NAME || 'Envision'}" <${process.env.EMAIL_USER}>`,
       to: process.env.EMAIL_TO,
-      reply_to: req.body.email,
+      replyTo: req.body.email,
       subject: `[Enquiry #${enquiryId}] ${req.body.firstName} ${req.body.lastName}`,
       html: buildEmailHTML(req.body),
-    });
+    };
 
-    if (error) {
-      console.error('Resend Error:', error);
-      // Fallback response even if email fails to keep the UX smooth
-      return res.status(201).json({ success: true, message: 'Enquiry submitted (Email pending API Key)' });
+    console.log(`📤 Attempting to send email to: ${process.env.EMAIL_TO}`);
+
+    // Use await for sendMail to catch errors properly
+    try {
+      const info = await transporter.sendMail(mailOptions);
+      console.log(`📧 Enquiry email sent via SMTP: ${info.messageId}`);
+    } catch (mailError) {
+      console.error('❌ SMTP Error while sending enquiry email:', mailError);
+      // We don't fail the whole request if email fails, as the enquiry is already in DB
     }
 
-    console.log(`📧 Enquiry email sent via Resend: ${data.id}`);
-
+    // We return success even if email is async sending to keep UX fast
     res.status(201).json({ success: true, message: 'Enquiry submitted successfully' });
   } catch (error) {
-    console.error('Enquiry Submission Error:', error);
+    console.error('❌ Enquiry Submission Error:', error);
     res.status(500).json({ success: false, message: 'Server error while submitting enquiry' });
   }
 });
@@ -110,7 +140,7 @@ router.patch('/:id/read', protect, async (req, res) => {
 router.get('/', protect, async (req, res) => {
   try {
     const enquiries = await Enquiry.find().sort({ createdAt: -1 });
-    res.json(enquiries);
+    res.json({ success: true, count: enquiries.length, enquiries });
   } catch (error) {
     console.error('Get Enquiries Error:', error);
     res.status(500).json({ success: false, message: 'Server error while fetching enquiries' });
