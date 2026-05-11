@@ -81,7 +81,7 @@ const buildEmailHTML = (data) => `
 `;
 
 // ── Spam Filter Helper ──────────────────────────────────────
-const isSpam = (data) => {
+const checkSpamStatus = (data) => {
   const spamKeywords = [
     'crypto', 'bitcoin', 'investment', 'casino', 'gambling', 'viagra', 'cialis',
     'earn money', 'work from home', 'marketing agency', 'seo services',
@@ -90,18 +90,43 @@ const isSpam = (data) => {
   
   const content = `${data.firstName} ${data.lastName} ${data.message} ${data.email}`.toLowerCase();
   
-  // 1. Check for keywords
-  if (spamKeywords.some(keyword => content.includes(keyword))) return true;
+  // 1. Check for keywords -> Mark as SPAM
+  if (spamKeywords.some(keyword => content.includes(keyword))) return 'spam';
   
-  // 2. Check for excessive URLs
+  // 2. Check for excessive URLs -> Mark as SPAM
   const urlCount = (data.message.match(/https?:\/\//gi) || []).length;
-  if (urlCount > 2) return true;
+  if (urlCount > 2) return 'spam';
   
-  // 3. Check for specific spam patterns (e.g. "Russian" characters or weird strings)
+  // 3. Check for Cyrillic characters -> Mark as HIGH-RISK (Manual Review)
   const cyrillicPattern = /[\u0400-\u04FF]/;
-  if (cyrillicPattern.test(data.message)) return true;
+  if (cyrillicPattern.test(data.message)) return 'high-risk';
 
-  return false;
+  return null; // Clean
+};
+
+// ── Turnstile Verification Helper ─────────────────────────────
+const verifyTurnstile = async (token) => {
+  if (!token) return false;
+  
+  const secretKey = process.env.TURNSTILE_SECRET_KEY;
+  if (!secretKey) {
+    console.warn('⚠️ TURNSTILE_SECRET_KEY is not set in .env');
+    return true; // Don't block if not configured, but log warning
+  }
+
+  try {
+    const response = await fetch('https://challenges.cloudflare.com/turnstile/v0/siteverify', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: `secret=${secretKey}&response=${token}`
+    });
+
+    const outcome = await response.json();
+    return outcome.success;
+  } catch (error) {
+    console.error('❌ Turnstile verification error:', error);
+    return false;
+  }
 };
 
 // @route   POST /api/enquiry
@@ -109,31 +134,43 @@ const isSpam = (data) => {
 // @access  Public
 router.post('/', async (req, res) => {
   try {
-    console.log('📩 Received new enquiry from:', req.body.email);
+    const { turnstileToken, ...formData } = req.body;
+    console.log('📩 Received new enquiry from:', formData.email);
 
-    const spamFlag = isSpam(req.body);
-    if (spamFlag) {
-      console.log('⚠️ Spam detected for enquiry from:', req.body.email);
+    // 1. Verify Turnstile (Bot protection)
+    const isHuman = await verifyTurnstile(turnstileToken);
+    if (!isHuman) {
+      console.log('🤖 Bot detected or Turnstile failed for:', formData.email);
+      return res.status(403).json({ success: false, message: 'Bot verification failed. Please try again.' });
     }
 
-    // 1. Save to MongoDB
+    // 2. Check for Spam/Risk levels
+    const riskStatus = checkSpamStatus(formData);
+    const finalStatus = riskStatus || 'unread';
+
+    if (riskStatus) {
+      console.log(`⚠️ ${riskStatus.toUpperCase()} detected for enquiry from:`, formData.email);
+    }
+
+    // 3. Save to MongoDB
     const newEnquiry = new Enquiry({
-      ...req.body,
-      status: spamFlag ? 'spam' : 'unread'
+      ...formData,
+      status: finalStatus
     });
     await newEnquiry.save();
-    console.log('✅ Enquiry saved to database (Status: ' + (spamFlag ? 'spam' : 'unread') + ')');
+    console.log(`✅ Enquiry saved to database (Status: ${finalStatus})`);
 
-    // 2. Send email via SMTP (ONLY if not spam)
-    if (!spamFlag) {
+    // 4. Send email via SMTP (ONLY if not spam and not high-risk)
+    // We skip email for high-risk to ensure manual review in dashboard
+    if (finalStatus === 'unread') {
       const enquiryId = newEnquiry._id.toString().slice(-6).toUpperCase();
       
       const mailOptions = {
         from: `"${process.env.EMAIL_FROM_NAME || 'Envision'}" <${process.env.EMAIL_USER}>`,
         to: process.env.EMAIL_TO,
-        replyTo: req.body.email,
-        subject: `[Enquiry #${enquiryId}] ${req.body.firstName} ${req.body.lastName}`,
-        html: buildEmailHTML(req.body),
+        replyTo: formData.email,
+        subject: `[Enquiry #${enquiryId}] ${formData.firstName} ${formData.lastName}`,
+        html: buildEmailHTML(formData),
       };
 
       console.log(`📤 Attempting to send email to: ${process.env.EMAIL_TO}`);

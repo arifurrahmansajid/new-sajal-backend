@@ -51,7 +51,7 @@ const EnquirySchema = new mongoose.Schema({
   },
   status: {
     type: String,
-    enum: ['unread', 'read', 'spam'],
+    enum: ['unread', 'read', 'spam', 'high-risk'],
     default: 'unread',
   },
   createdAt: {
