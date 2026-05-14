@@ -16,10 +16,15 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
 // ── Routes ─────────────────────────────────────────────────
-app.use('/api/auth', require('./routes/auth'));
-app.use('/api/blogs', require('./routes/blog'));
-app.use('/api/enquiry', require('./routes/enquiry'));
-app.use('/api/settings', require('./routes/settings'));
+const routes = express.Router();
+routes.use('/auth', require('./routes/auth'));
+routes.use('/blogs', require('./routes/blog'));
+routes.use('/enquiry', require('./routes/enquiry'));
+routes.use('/settings', require('./routes/settings'));
+
+app.use('/api', routes);
+app.use('/', routes);
+
 
 // ── Health check ───────────────────────────────────────────
 app.get('/api/health', (req, res) => {
