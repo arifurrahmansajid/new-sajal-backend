@@ -8,7 +8,15 @@ const app = express();
 
 // ── Middleware ─────────────────────────────────────────────
 app.use(cors({
-  origin: ['http://localhost:5173', 'http://localhost:5174', 'http://localhost:3000', 'https://cleint-12-g1yv.vercel.app', 'https://new-sajal-frontend.vercel.app'],
+  origin: [
+    'http://localhost:5173',
+    'http://localhost:5174',
+    'http://localhost:3000',
+    'https://cleint-12-g1yv.vercel.app',
+    'https://new-sajal-frontend.vercel.app',
+    'https://www.myenvisionltd.com',
+    'https://myenvisionltd.com'
+  ],
   credentials: true,
 }));
 
@@ -27,7 +35,7 @@ app.use('/', routes);
 
 
 // ── Health check ───────────────────────────────────────────
-app.get('/api/health', (req, res) => {
+app.get(['/api/health', '/health'], (req, res) => {
   res.json({ success: true, message: '🚀 Envision Blog API is running.' });
 });
 
