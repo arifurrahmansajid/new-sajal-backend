@@ -13,7 +13,9 @@ const allowedOrigins = [
   'http://localhost:5174',
   'http://localhost:3000',
   'https://cleint-12-g1yv.vercel.app',
-  'https://new-sajal-frontend.vercel.app'
+  'https://new-sajal-frontend.vercel.app',
+  'https://www.myenvisionltd.com',
+  'https://myenvisionltd.com'
 ];
 
 app.use(cors({
